@@ -1,8 +1,7 @@
 use image::codecs::jpeg::JpegDecoder;
 use image::codecs::png::PngDecoder;
-use image::ImageFormat;
 use printpdf::{
-    ColorBits, ColorSpace, Image as PdfImage, ImageTransform, ImageXObject, Mm, PdfDocument, Px,
+    ColorBits, ColorSpace, Image, ImageTransform, ImageXObject, Mm, PdfDocument, Px, PdfConformance, CustomPdfConformance,
 };
 use std::fs;
 use std::fs::File;
@@ -10,7 +9,8 @@ use std::io::{BufWriter, Cursor, Read};
 use std::path::Path;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let folder_path = "D:/115/115Chrome/mass/mass/zhong_mo_de_hou_gong_qi_xiang_qu/test"; // 替换为你的文件夹路径
+    // let folder_path = "D:/115/115Chrome/mass/mass/zhong_mo_de_hou_gong_qi_xiang_qu/test"; // 替换为你的文件夹路径
+    let folder_path = "./img";
     let output_pdf_path = "./output.pdf"; // 输出的 PDF 文件名
 
     // 设定统一的 PDF 页面尺寸（A4）
@@ -42,10 +42,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("image_files len{}", image_files.len());
 
     // 创建 PDF 文档
-    let (document, page1, layer1) =
+    let (mut document, page1, layer1) =
         PdfDocument::new("My Document", page_width, page_height, "Layer 1");
 
-    let mut current_layer = document.get_page(page1).get_layer(layer1);
+    document = document.with_conformance(PdfConformance::Custom(CustomPdfConformance {
+        requires_icc_profile: false,
+        requires_xmp_metadata: false,
+        ..Default::default()
+    }));
+
+    let mut current_layer;
+    let mut count = 0;
 
     for file_name in image_files {
         let img_path = Path::new(folder_path).join(&file_name);
@@ -65,34 +72,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        // let image_bytes  = fs::read(&img_path)?;
-        let image_bytes  = include_bytes!("D:/115/115Chrome/mass/mass/zhong_mo_de_hou_gong_qi_xiang_qu/test/0.jpg");
-        let mut reader = Cursor::new(image_bytes.as_ref());
-        let decoder = JpegDecoder::new(&mut reader).unwrap();
-        let image = PdfImage::try_from(decoder).unwrap();
+        current_layer = if count > 0 {
+            let (page, layer) = document.add_page(Mm(page_width.0), Mm(page_height.0), "Layer 1");
+            document.get_page(page).get_layer(layer)
+        } else {
+            document.get_page(page1).get_layer(layer1)
+        };
 
-        let (page, layer) = document.add_page(Mm(page_width.0), Mm(page_height.0), "Layer 1");
+        count += 1;
+        let img_path = Path::new(folder_path).join(&file_name);
+        let img = match format {
+            image::ImageFormat::Png => {
+                let mut image_file = File::open(img_path).unwrap();
+                let decoder = PngDecoder::new(&mut image_file)?;
+                let temp_image = Image::try_from(decoder).unwrap();
+                temp_image
+            }
+            image::ImageFormat::Jpeg => {
+                let mut image_file = File::open(img_path).unwrap();
+                let decoder = JpegDecoder::new(&mut image_file)?;
+                let temp_image = Image::try_from(decoder).unwrap();
+                temp_image
+            }
+            _ => {
+                eprintln!("不支持的图像格式");
+                return Err("不支持的图像格式".into());
+            }
+        };
 
-        // 获取当前页面的图层引用
-        current_layer = document.get_page(page).get_layer(layer);
-        image.add_to_layer(current_layer, ImageTransform::default());
-
-        // let img = match format {
-        //     ImageFormat::Png => {
-        //         let decoder = PngDecoder::new(&mut reader)?;
-        //         let image = PdfImage::try_from(decoder).unwrap();
-        //         image.add_to_layer(current_layer, ImageTransform::default());
-        //     }
-        //     ImageFormat::Jpeg => {
-        //         let decoder = JpegDecoder::new(&mut reader)?;
-        //         let image = PdfImage::try_from(decoder).unwrap();
-        //         image.add_to_layer(current_layer, ImageTransform::default());
-        //     }
-        //     _ => {
-        //         eprintln!("不支持的图像格式");
-        //         return Err("不支持的图像格式".into());
-        //     }
-        // };
+        img.add_to_layer(current_layer, ImageTransform::default());
 
         // let img = image::open(img_path).expect("Failed to open image");
 
@@ -150,10 +158,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // // });
         // pdf_image.add_to_layer(current_layer, ImageTransform::default());
     }
-
+    println!("count is {}", count);
     // 保存 PDF 文件
     let output_file = File::create(output_pdf_path).expect("Failed to create PDF file");
     let mut writer = BufWriter::new(output_file);
     document.save(&mut writer).expect("Failed to save PDF");
     Ok(())
 }
+
+
+// // Compile with --feature="embedded_images"
+
+// // imports the `image` library with the exact version that we are using
+// use image::codecs::jpeg::JpegDecoder;
+// use printpdf::{ImageTransform, Image, Mm, PdfDocument};
+// use std::fs::File;
+// use std::io::BufWriter;
+
+// fn main() {
+//     let (doc, page1, layer1) = PdfDocument::new("PDF_Document_title", Mm(247.0), Mm(210.0), "Layer 1");
+//     let current_layer = doc.get_page(page1).get_layer(layer1);
+
+//     // currently, the only reliable file formats are bmp/jpeg/png
+//     // this is an issue of the image library, not a fault of printpdf
+//     let mut image_file = File::open("D:/115/115Chrome/mass/mass/zhong_mo_de_hou_gong_qi_xiang_qu/test/0.jpg").unwrap();
+//     let image = Image::try_from(JpegDecoder::new(&mut image_file).unwrap()).unwrap();
+
+//     // translate x, translate y, rotate, scale x, scale y
+//     // by default, an image is optimized to 300 DPI (if scale is None)
+//     // rotations and translations are always in relation to the lower left corner
+//     image.add_to_layer(current_layer.clone(), ImageTransform::default());
+//     doc.save(&mut BufWriter::new(File::create("./test.pdf").unwrap())).unwrap();
+// }
