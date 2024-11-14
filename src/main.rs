@@ -1,13 +1,15 @@
-use image::GenericImageView;
+use image::codecs::jpeg::JpegDecoder;
+use image::codecs::png::PngDecoder;
+use image::ImageFormat;
 use printpdf::{
     ColorBits, ColorSpace, Image as PdfImage, ImageTransform, ImageXObject, Mm, PdfDocument, Px,
 };
 use std::fs;
 use std::fs::File;
-use std::io::BufWriter;
+use std::io::{BufWriter, Cursor, Read};
 use std::path::Path;
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let folder_path = "D:/115/115Chrome/mass/mass/zhong_mo_de_hou_gong_qi_xiang_qu/test"; // 替换为你的文件夹路径
     let output_pdf_path = "./output.pdf"; // 输出的 PDF 文件名
 
@@ -47,59 +49,105 @@ fn main() {
 
     for file_name in image_files {
         let img_path = Path::new(folder_path).join(&file_name);
-        let img = image::open(img_path).expect("Failed to open image");
 
-        // 将 DynamicImage 转换为适合 printpdf 的格式
-        let (img_width, img_height) = img.dimensions();
-        let img_bytes = img.to_rgba8().into_raw(); // 转换为 RGBA 格式的字节
+        let mut file = File::open(img_path)?;
 
-        // 创建 ImageXObject
-        let image_xobject = ImageXObject {
-            width: Px(img_width as usize),
-            height: Px(img_height as usize),
-            color_space: ColorSpace::Rgb, // 根据需要选择颜色空间
-            bits_per_component: ColorBits::Bit8,
-            interpolate: true,
-            image_data: img_bytes,
-            image_filter: None,
-            clipping_bbox: None,
-            smask: None,
+        // 读取文件的前几个字节以判断格式
+        let mut buffer = [0; 8];
+        file.read_exact(&mut buffer)?;
+
+        // 根据读取的字节判断格式
+        let format = match image::guess_format(&buffer) {
+            Ok(format) => format,
+            Err(e) => {
+                eprintln!("无法判断图像格式: {}", e);
+                return Err(Box::new(e));
+            }
         };
 
-        // 创建 PdfImage
-        let pdf_image = PdfImage::from(image_xobject);
+        // let image_bytes  = fs::read(&img_path)?;
+        let image_bytes  = include_bytes!("D:/115/115Chrome/mass/mass/zhong_mo_de_hou_gong_qi_xiang_qu/test/0.jpg");
+        let mut reader = Cursor::new(image_bytes.as_ref());
+        let decoder = JpegDecoder::new(&mut reader).unwrap();
+        let image = PdfImage::try_from(decoder).unwrap();
 
-        // 计算缩放比例
-        let img_aspect_ratio = img_width as f32 / img_height as f32;
-        let page_aspect_ratio = page_width.0 / page_height.0;
-
-        let (final_width, final_height) = if img_aspect_ratio > page_aspect_ratio {
-            // 图片更宽，按宽度缩放
-            (page_width.0, page_width.0 / img_aspect_ratio)
-        } else {
-            // 图片更高，按高度缩放
-            (page_height.0 * img_aspect_ratio, page_height.0)
-        };
-
-        // 添加新页面
         let (page, layer) = document.add_page(Mm(page_width.0), Mm(page_height.0), "Layer 1");
 
         // 获取当前页面的图层引用
         current_layer = document.get_page(page).get_layer(layer);
+        image.add_to_layer(current_layer, ImageTransform::default());
 
-        // 计算居中位置
-        let x_offset = (page_width.0 - final_width) / 2.0;
-        let y_offset = (page_height.0 - final_height) / 2.0;
+        // let img = match format {
+        //     ImageFormat::Png => {
+        //         let decoder = PngDecoder::new(&mut reader)?;
+        //         let image = PdfImage::try_from(decoder).unwrap();
+        //         image.add_to_layer(current_layer, ImageTransform::default());
+        //     }
+        //     ImageFormat::Jpeg => {
+        //         let decoder = JpegDecoder::new(&mut reader)?;
+        //         let image = PdfImage::try_from(decoder).unwrap();
+        //         image.add_to_layer(current_layer, ImageTransform::default());
+        //     }
+        //     _ => {
+        //         eprintln!("不支持的图像格式");
+        //         return Err("不支持的图像格式".into());
+        //     }
+        // };
 
-        // 将图片添加到 PDF 页面
-        pdf_image.add_to_layer(current_layer.clone(), ImageTransform {
-            translate_x: Some(Mm(x_offset)),
-            translate_y: Some(Mm(y_offset)),
-            scale_x: None,
-            scale_y: None,
-            rotate: None,
-            dpi: None,
-        });
+        // let img = image::open(img_path).expect("Failed to open image");
+
+        // // 将 DynamicImage 转换为适合 printpdf 的格式
+        // let (img_width, img_height) = img.dimensions();
+        // println!("img_width img_height {} {}", img_width, img_height);
+        // let img_bytes = img.to_rgba8().into_raw(); // 转换为 RGBA 格式的字节
+
+        // // 创建 ImageXObject
+        // let image_xobject = ImageXObject {
+        //     width: Px(img_width as usize),
+        //     height: Px(img_height as usize),
+        //     color_space: ColorSpace::Rgb, // 根据需要选择颜色空间
+        //     bits_per_component: ColorBits::Bit16,
+        //     interpolate: true,
+        //     image_data: img_bytes,
+        //     image_filter: None,
+        //     clipping_bbox: None,
+        //     smask: None,
+        // };
+
+        // // 创建 PdfImage
+        // let pdf_image = PdfImage::from(image_xobject);
+
+        // // 计算缩放比例
+        // let img_aspect_ratio = img_width as f32 / img_height as f32;
+        // let page_aspect_ratio = page_width.0 / page_height.0;
+
+        // let (final_width, final_height) = if img_aspect_ratio > page_aspect_ratio {
+        //     // 图片更宽，按宽度缩放
+        //     (page_width.0, page_width.0 / img_aspect_ratio)
+        // } else {
+        //     // 图片更高，按高度缩放
+        //     (page_height.0 * img_aspect_ratio, page_height.0)
+        // };
+
+        // // 添加新页面
+        // let (page, layer) = document.add_page(Mm(page_width.0), Mm(page_height.0), "Layer 1");
+
+        // // 获取当前页面的图层引用
+        // current_layer = document.get_page(page).get_layer(layer);
+
+        // // 计算居中位置
+        // let x_offset = (page_width.0 - final_width) / 2.0;
+        // let y_offset = (page_height.0 - final_height) / 2.0;
+
+        // // 将图片添加到 PDF 页面
+        // // pdf_image.add_to_layer(current_layer.clone(), ImageTransform {
+        // //     translate_x: Some(Mm(x_offset)),
+        // //     translate_y: Some(Mm(y_offset)),
+        // //     scale_x: None,
+        // //     scale_y: None,
+        // //     rotate: None,
+        // //     dpi: None,
+        // // });
         // pdf_image.add_to_layer(current_layer, ImageTransform::default());
     }
 
@@ -107,4 +155,5 @@ fn main() {
     let output_file = File::create(output_pdf_path).expect("Failed to create PDF file");
     let mut writer = BufWriter::new(output_file);
     document.save(&mut writer).expect("Failed to save PDF");
+    Ok(())
 }
